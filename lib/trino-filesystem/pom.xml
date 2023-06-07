@@ -37,6 +37,29 @@
             <artifactId>guava</artifactId>
         </dependency>
 
+<!--        <dependency>-->
+<!--            <groupId>org.apache.iceberg</groupId>-->
+<!--            <artifactId>iceberg-aws</artifactId>-->
+<!--            <exclusions>-->
+<!--                <exclusion>-->
+<!--                    <groupId>org.apache.iceberg</groupId>-->
+<!--                    <artifactId>iceberg-core</artifactId>-->
+<!--                </exclusion>-->
+<!--                <exclusion>-->
+<!--                    <groupId>org.apache.iceberg</groupId>-->
+<!--                    <artifactId>iceberg-api</artifactId>-->
+<!--                </exclusion>-->
+<!--                <exclusion>-->
+<!--                    <groupId>org.apache.iceberg</groupId>-->
+<!--                    <artifactId>iceberg-bundled-guava</artifactId>-->
+<!--                </exclusion>-->
+<!--                <exclusion>-->
+<!--                    <groupId>org.apache.iceberg</groupId>-->
+<!--                    <artifactId>iceberg-common</artifactId>-->
+<!--                </exclusion>-->
+<!--            </exclusions>-->
+<!--        </dependency>-->
+
         <!-- used by tests but also needed transitively -->
         <dependency>
             <groupId>com.google.code.findbugs</groupId>
