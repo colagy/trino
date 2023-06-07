@@ -15,6 +15,7 @@ package io.trino.metadata;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.util.concurrent.UncheckedExecutionException;
+import com.google.inject.Inject;
 import io.trino.FeaturesConfig;
 import io.trino.collect.cache.NonEvictableCache;
 import io.trino.connector.CatalogServiceProvider;
@@ -32,14 +33,11 @@ import io.trino.spi.function.InOut;
 import io.trino.spi.function.InvocationConvention;
 import io.trino.spi.function.InvocationConvention.InvocationArgumentConvention;
 import io.trino.spi.function.ScalarFunctionImplementation;
-import io.trino.spi.function.SchemaFunctionName;
 import io.trino.spi.function.WindowFunctionSupplier;
 import io.trino.spi.ptf.TableFunctionProcessorProvider;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.TypeOperators;
 import io.trino.type.BlockTypeOperators;
-
-import javax.inject.Inject;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodType;
@@ -153,7 +151,6 @@ public class FunctionManager
     public TableFunctionProcessorProvider getTableFunctionProcessorProvider(TableFunctionHandle tableFunctionHandle)
     {
         CatalogHandle catalogHandle = tableFunctionHandle.getCatalogHandle();
-        SchemaFunctionName functionName = tableFunctionHandle.getSchemaFunctionName();
 
         FunctionProvider provider;
         if (catalogHandle.equals(GlobalSystemConnector.CATALOG_HANDLE)) {
@@ -161,10 +158,10 @@ public class FunctionManager
         }
         else {
             provider = functionProviders.getService(catalogHandle);
-            checkArgument(provider != null, "No function provider for catalog: '%s' (function '%s')", catalogHandle, functionName);
+            checkArgument(provider != null, "No function provider for catalog: '%s'", catalogHandle);
         }
 
-        return provider.getTableFunctionProcessorProvider(functionName);
+        return provider.getTableFunctionProcessorProvider(tableFunctionHandle.getFunctionHandle());
     }
 
     private FunctionDependencies getFunctionDependencies(ResolvedFunction resolvedFunction)

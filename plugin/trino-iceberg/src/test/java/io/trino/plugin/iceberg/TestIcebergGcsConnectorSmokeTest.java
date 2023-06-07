@@ -14,22 +14,10 @@
 package io.trino.plugin.iceberg;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.io.Resources;
 import io.airlift.log.Logger;
-import io.trino.filesystem.TrinoFileSystem;
-import io.trino.filesystem.TrinoFileSystemFactory;
-import io.trino.filesystem.hdfs.HdfsFileSystemFactory;
-import io.trino.hdfs.ConfigurationInitializer;
-import io.trino.hdfs.DynamicHdfsConfiguration;
-import io.trino.hdfs.HdfsConfig;
-import io.trino.hdfs.HdfsConfiguration;
-import io.trino.hdfs.HdfsConfigurationInitializer;
-import io.trino.hdfs.HdfsEnvironment;
-import io.trino.hdfs.authentication.NoHdfsAuthentication;
+import io.trino.filesystem.Location;
 import io.trino.plugin.hive.containers.HiveHadoop;
-import io.trino.plugin.hive.gcs.GoogleGcsConfigurationInitializer;
-import io.trino.plugin.hive.gcs.HiveGcsConfig;
 import io.trino.plugin.hive.metastore.HiveMetastore;
 import io.trino.plugin.hive.metastore.thrift.BridgingHiveMetastore;
 import io.trino.testing.QueryRunner;
@@ -51,7 +39,6 @@ import java.util.Base64;
 import static io.trino.plugin.hive.TestingThriftHiveMetastoreBuilder.testingThriftHiveMetastoreBuilder;
 import static io.trino.plugin.hive.containers.HiveHadoop.HIVE3_IMAGE;
 import static io.trino.plugin.iceberg.IcebergTestUtils.checkOrcFileSorting;
-import static io.trino.testing.TestingConnectorSession.SESSION;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -70,7 +57,6 @@ public class TestIcebergGcsConnectorSmokeTest
     private final String schema;
 
     private HiveHadoop hiveHadoop;
-    private TrinoFileSystemFactory fileSystemFactory;
 
     @Parameters({"testing.gcp-storage-bucket", "testing.gcp-credentials-key"})
     public TestIcebergGcsConnectorSmokeTest(String gcpStorageBucket, String gcpCredentialKey)
@@ -106,12 +92,6 @@ public class TestIcebergGcsConnectorSmokeTest
                 .build());
         this.hiveHadoop.start();
 
-        HiveGcsConfig gcsConfig = new HiveGcsConfig().setJsonKeyFilePath(gcpCredentialsFile.toAbsolutePath().toString());
-        ConfigurationInitializer configurationInitializer = new GoogleGcsConfigurationInitializer(gcsConfig);
-        HdfsConfigurationInitializer initializer = new HdfsConfigurationInitializer(new HdfsConfig(), ImmutableSet.of(configurationInitializer));
-        HdfsConfiguration hdfsConfiguration = new DynamicHdfsConfiguration(initializer, ImmutableSet.of());
-        this.fileSystemFactory = new HdfsFileSystemFactory(new HdfsEnvironment(hdfsConfiguration, new HdfsConfig(), new NoHdfsAuthentication()));
-
         return IcebergQueryRunner.builder()
                 .setIcebergProperties(ImmutableMap.<String, String>builder()
                         .put("iceberg.catalog.type", "hive_metastore")
@@ -134,8 +114,7 @@ public class TestIcebergGcsConnectorSmokeTest
     public void removeTestData()
     {
         try {
-            TrinoFileSystem fileSystem = fileSystemFactory.create(SESSION);
-            fileSystem.deleteDirectory(schemaPath());
+            fileSystem.deleteDirectory(Location.of(schemaPath()));
         }
         catch (IOException e) {
             // The GCS bucket should be configured to expire objects automatically. Clean up issues do not need to fail the test.
@@ -172,8 +151,7 @@ public class TestIcebergGcsConnectorSmokeTest
     protected boolean locationExists(String location)
     {
         try {
-            TrinoFileSystem fileSystem = fileSystemFactory.create(SESSION);
-            return fileSystem.newInputFile(location).exists();
+            return fileSystem.newInputFile(Location.of(location)).exists();
         }
         catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -217,8 +195,7 @@ public class TestIcebergGcsConnectorSmokeTest
     protected void deleteDirectory(String location)
     {
         try {
-            TrinoFileSystem fileSystem = fileSystemFactory.create(SESSION);
-            fileSystem.deleteDirectory(location);
+            fileSystem.deleteDirectory(Location.of(location));
         }
         catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -226,8 +203,8 @@ public class TestIcebergGcsConnectorSmokeTest
     }
 
     @Override
-    protected boolean isFileSorted(String path, String sortColumnName)
+    protected boolean isFileSorted(Location path, String sortColumnName)
     {
-        return checkOrcFileSorting(fileSystemFactory, path, sortColumnName);
+        return checkOrcFileSorting(fileSystem, path, sortColumnName);
     }
 }

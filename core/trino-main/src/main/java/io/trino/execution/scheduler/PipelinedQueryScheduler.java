@@ -25,6 +25,8 @@ import io.airlift.concurrent.SetThreadName;
 import io.airlift.log.Logger;
 import io.airlift.stats.TimeStat;
 import io.airlift.units.Duration;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.Tracer;
 import io.trino.Session;
 import io.trino.exchange.DirectExchangeInput;
 import io.trino.execution.BasicStageStats;
@@ -199,6 +201,7 @@ public class PipelinedQueryScheduler
             FailureDetector failureDetector,
             NodeTaskMap nodeTaskMap,
             ExecutionPolicy executionPolicy,
+            Tracer tracer,
             SplitSchedulerStats schedulerStats,
             DynamicFilterService dynamicFilterService,
             TableExecuteContextManager tableExecuteContextManager,
@@ -224,6 +227,7 @@ public class PipelinedQueryScheduler
                 metadata,
                 remoteTaskFactory,
                 nodeTaskMap,
+                tracer,
                 schedulerStats,
                 plan,
                 summarizeTaskInfo);
@@ -1025,10 +1029,11 @@ public class PipelinedQueryScheduler
                 TableExecuteContextManager tableExecuteContextManager)
         {
             Session session = queryStateMachine.getSession();
+            Span stageSpan = stageExecution.getStageSpan();
             PlanFragment fragment = stageExecution.getFragment();
             PartitioningHandle partitioningHandle = fragment.getPartitioning();
             Optional<Integer> partitionCount = fragment.getPartitionCount();
-            Map<PlanNodeId, SplitSource> splitSources = splitSourceFactory.createSplitSources(session, fragment);
+            Map<PlanNodeId, SplitSource> splitSources = splitSourceFactory.createSplitSources(session, stageSpan, fragment);
             if (!splitSources.isEmpty()) {
                 queryStateMachine.addStateChangeListener(new StateChangeListener<>()
                 {
@@ -1050,19 +1055,39 @@ public class PipelinedQueryScheduler
 
             if (partitioningHandle.equals(SOURCE_DISTRIBUTION)) {
                 // nodes are selected dynamically based on the constraints of the splits and the system load
-                Entry<PlanNodeId, SplitSource> entry = getOnlyElement(splitSources.entrySet());
-                PlanNodeId planNodeId = entry.getKey();
-                SplitSource splitSource = entry.getValue();
-                Optional<CatalogHandle> catalogHandle = Optional.of(splitSource.getCatalogHandle())
-                        .filter(catalog -> !catalog.getType().isInternal());
-                NodeSelector nodeSelector = nodeScheduler.createNodeSelector(session, catalogHandle);
-                SplitPlacementPolicy placementPolicy = new DynamicSplitPlacementPolicy(nodeSelector, stageExecution::getAllTasks);
+                if (splitSources.size() == 1) {
+                    Entry<PlanNodeId, SplitSource> entry = getOnlyElement(splitSources.entrySet());
+                    PlanNodeId planNodeId = entry.getKey();
+                    SplitSource splitSource = entry.getValue();
+                    Optional<CatalogHandle> catalogHandle = Optional.of(splitSource.getCatalogHandle())
+                            .filter(catalog -> !catalog.getType().isInternal());
+                    NodeSelector nodeSelector = nodeScheduler.createNodeSelector(session, catalogHandle);
+                    SplitPlacementPolicy placementPolicy = new DynamicSplitPlacementPolicy(nodeSelector, stageExecution::getAllTasks);
 
-                return newSourcePartitionedSchedulerAsStageScheduler(
+                    return newSourcePartitionedSchedulerAsStageScheduler(
+                            stageExecution,
+                            planNodeId,
+                            splitSource,
+                            placementPolicy,
+                            splitBatchSize,
+                            dynamicFilterService,
+                            tableExecuteContextManager,
+                            () -> childStageExecutions.stream().anyMatch(StageExecution::isAnyTaskBlocked));
+                }
+                Set<CatalogHandle> allCatalogHandles = splitSources.values()
+                        .stream()
+                        .map(SplitSource::getCatalogHandle)
+                        .filter(catalog -> !catalog.getType().isInternal())
+                        .collect(toImmutableSet());
+                checkState(allCatalogHandles.size() <= 1, "table scans that are within one stage should read from same catalog");
+
+                Optional<CatalogHandle> catalogHandle = allCatalogHandles.size() == 1 ? Optional.of(getOnlyElement(allCatalogHandles)) : Optional.empty();
+
+                NodeSelector nodeSelector = nodeScheduler.createNodeSelector(session, catalogHandle);
+                return new MultiSourcePartitionedScheduler(
                         stageExecution,
-                        planNodeId,
-                        splitSource,
-                        placementPolicy,
+                        splitSources,
+                        new DynamicSplitPlacementPolicy(nodeSelector, stageExecution::getAllTasks),
                         splitBatchSize,
                         dynamicFilterService,
                         tableExecuteContextManager,

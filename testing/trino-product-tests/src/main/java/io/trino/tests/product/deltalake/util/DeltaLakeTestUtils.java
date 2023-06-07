@@ -23,7 +23,6 @@ import dev.failsafe.Failsafe;
 import dev.failsafe.RetryPolicy;
 import io.airlift.log.Logger;
 import io.trino.tempto.query.QueryResult;
-import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.intellij.lang.annotations.Language;
 
 import java.time.temporal.ChronoUnit;
@@ -31,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.collect.MoreCollectors.onlyElement;
 import static io.trino.tests.product.utils.QueryExecutors.onDelta;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
@@ -46,7 +46,7 @@ public final class DeltaLakeTestUtils
             "\\Q[Databricks][DatabricksJDBCDriver](500593) Communication link failure. Failed to connect to server. Reason: HTTP retry after response received with no Retry-After header, error: HTTP Response code: 503, Error message: Unknown.";
     private static final RetryPolicy<QueryResult> CONCURRENT_MODIFICATION_EXCEPTION_RETRY_POLICY = RetryPolicy.<QueryResult>builder()
             .handleIf(throwable -> Throwables.getRootCause(throwable) instanceof ConcurrentModificationException)
-            .handleIf(throwable -> Throwables.getRootCause(throwable) instanceof MetaException metaException && metaException.getMessage() != null && metaException.getMessage().contains("Table being modified concurrently"))
+            .handleIf(throwable -> throwable.getMessage() != null && throwable.getMessage().contains("Table being modified concurrently"))
             .withBackoff(1, 10, ChronoUnit.SECONDS)
             .withMaxRetries(3)
             .onRetry(event -> log.warn(event.getLastException(), "Query failed on attempt %d, will retry.", event.getAttemptCount()))
@@ -77,6 +77,12 @@ public final class DeltaLakeTestUtils
         return (String) result.row(2).get(1);
     }
 
+    public static String getTableCommentOnTrino(String schemaName, String tableName)
+    {
+        return (String) onTrino().executeQuery("SELECT comment FROM system.metadata.table_comments WHERE catalog_name = 'delta' AND schema_name = '" + schemaName + "' AND table_name = '" + tableName + "'")
+                .getOnlyValue();
+    }
+
     public static String getTableCommentOnDelta(String schemaName, String tableName)
     {
         QueryResult result = onDelta().executeQuery(format("DESCRIBE EXTENDED %s.%s", schemaName, tableName));
@@ -84,6 +90,12 @@ public final class DeltaLakeTestUtils
                 .filter(row -> row.get(0).equals("Comment"))
                 .map(row -> row.get(1))
                 .collect(onlyElement());
+    }
+
+    public static String getTablePropertyOnDelta(String schemaName, String tableName, String propertyName)
+    {
+        QueryResult result = onDelta().executeQuery("SHOW TBLPROPERTIES %s.%s(%s)".formatted(schemaName, tableName, propertyName));
+        return (String) getOnlyElement(result.rows()).get(1);
     }
 
     /**

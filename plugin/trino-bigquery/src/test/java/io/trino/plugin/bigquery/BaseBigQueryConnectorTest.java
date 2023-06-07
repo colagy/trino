@@ -16,8 +16,10 @@ package io.trino.plugin.bigquery;
 import com.google.cloud.bigquery.TableDefinition;
 import io.airlift.units.Duration;
 import io.trino.Session;
+import io.trino.spi.QueryId;
 import io.trino.testing.BaseConnectorTest;
 import io.trino.testing.MaterializedResult;
+import io.trino.testing.MaterializedResultWithQueryId;
 import io.trino.testing.TestingConnectorBehavior;
 import io.trino.testing.sql.TestTable;
 import org.intellij.lang.annotations.Language;
@@ -32,6 +34,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.function.Function;
 
 import static com.google.cloud.bigquery.TableDefinition.Type.EXTERNAL;
 import static com.google.cloud.bigquery.TableDefinition.Type.MATERIALIZED_VIEW;
@@ -76,7 +79,15 @@ public abstract class BaseBigQueryConnectorTest
     protected boolean hasBehavior(TestingConnectorBehavior connectorBehavior)
     {
         switch (connectorBehavior) {
+            case SUPPORTS_DELETE:
+            case SUPPORTS_UPDATE:
+            case SUPPORTS_MERGE:
+                return false;
+            case SUPPORTS_TRUNCATE:
+                return true;
+
             case SUPPORTS_TOPN_PUSHDOWN:
+            case SUPPORTS_DEREFERENCE_PUSHDOWN:
                 return false;
 
             case SUPPORTS_RENAME_SCHEMA:
@@ -90,11 +101,12 @@ public abstract class BaseBigQueryConnectorTest
             case SUPPORTS_SET_COLUMN_TYPE:
                 return false;
 
-            case SUPPORTS_NOT_NULL_CONSTRAINT:
+            case SUPPORTS_CREATE_VIEW:
+            case SUPPORTS_CREATE_MATERIALIZED_VIEW:
                 return false;
 
-            case SUPPORTS_TRUNCATE:
-                return true;
+            case SUPPORTS_NOT_NULL_CONSTRAINT:
+                return false;
 
             case SUPPORTS_NEGATIVE_DATE:
                 return false;
@@ -599,6 +611,50 @@ public abstract class BaseBigQueryConnectorTest
     }
 
     @Test
+    public void testQueryLabeling()
+    {
+        Function<String, Session> sessionWithToken = token -> Session.builder(getSession())
+                .setTraceToken(Optional.of(token))
+                .build();
+
+        String materializedView = "test_query_label" + randomNameSuffix();
+        try {
+            onBigQuery("CREATE MATERIALIZED VIEW test." + materializedView + " AS SELECT count(1) AS cnt FROM tpch.region");
+
+            @Language("SQL")
+            String query = "SELECT * FROM test." + materializedView;
+
+            MaterializedResultWithQueryId result = getDistributedQueryRunner().executeWithQueryId(sessionWithToken.apply("first_token"), query);
+            assertLabelForTable(materializedView, result.getQueryId(), "first_token");
+
+            MaterializedResultWithQueryId result2 = getDistributedQueryRunner().executeWithQueryId(sessionWithToken.apply("second_token"), query);
+            assertLabelForTable(materializedView, result2.getQueryId(), "second_token");
+
+            assertThatThrownBy(() -> getDistributedQueryRunner().executeWithQueryId(sessionWithToken.apply("InvalidToken"), query))
+                    .hasMessageContaining("BigQuery label value can contain only lowercase letters, numeric characters, underscores, and dashes");
+        }
+        finally {
+            onBigQuery("DROP MATERIALIZED VIEW IF EXISTS test." + materializedView);
+        }
+    }
+
+    private void assertLabelForTable(String expectedView, QueryId queryId, String traceToken)
+    {
+        String expectedLabel = "q_" + queryId.toString() + "__t_" + traceToken;
+
+        @Language("SQL")
+        String checkForLabelQuery = """
+                    SELECT * FROM region-us.INFORMATION_SCHEMA.JOBS_BY_USER WHERE EXISTS(
+                        SELECT * FROM UNNEST(labels) AS label WHERE label.key = 'trino_query' AND label.value = '%s'
+                    )""".formatted(expectedLabel);
+
+        assertThat(bigQuerySqlExecutor.executeQuery(checkForLabelQuery).getValues())
+                .extracting(values -> values.get("query").getStringValue())
+                .singleElement()
+                .matches(statement -> statement.contains(expectedView));
+    }
+
+    @Test
     public void testQueryCache()
     {
         Session queryResultsCacheSession = Session.builder(getSession())
@@ -855,6 +911,13 @@ public abstract class BaseBigQueryConnectorTest
             assertUpdate("INSERT INTO " + table.getName() + " (a, b) VALUES (ARRAY[1.23E1], ARRAY[1.23E1])", 1);
             assertQuery("SELECT a[1], b[1] FROM " + table.getName(), "VALUES (12.3, 12)");
         }
+    }
+
+    @Override
+    public void testInsertRowConcurrently()
+    {
+        // TODO https://github.com/trinodb/trino/issues/15158 Enable this test after switching to storage write API
+        throw new SkipException("Test fails with a timeout sometimes and is flaky");
     }
 
     @Override

@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Multimap;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
+import io.opentelemetry.api.trace.Span;
 import io.trino.client.NodeVersion;
 import io.trino.cost.StatsAndCosts;
 import io.trino.execution.ExecutionFailureInfo;
@@ -215,27 +216,28 @@ public class TestScaledWriterScheduler
     private static TaskStatus buildTaskStatus(boolean isOutputBufferOverUtilized, long outputDataSize, Optional<Integer> maxWriterCount, DataSize physicalWrittenDataSize)
     {
         return new TaskStatus(
-                        TaskId.valueOf("taskId"),
-                        "task-instance-id",
-                        0,
-                        TaskState.RUNNING,
-                        URI.create("fake://task/" + "taskId" + "/node/some_node"),
-                        "some_node",
-                        ImmutableList.of(),
-                        0,
-                        0,
-                        new OutputBufferStatus(OptionalLong.empty(), isOutputBufferOverUtilized, false),
-                        DataSize.ofBytes(outputDataSize),
-                        physicalWrittenDataSize,
-                        maxWriterCount,
-                        DataSize.of(1, DataSize.Unit.MEGABYTE),
-                        DataSize.of(1, DataSize.Unit.MEGABYTE),
-                        DataSize.of(0, DataSize.Unit.MEGABYTE),
-                        0,
-                        Duration.valueOf("0s"),
-                        0,
-                        1,
-                        1);
+                TaskId.valueOf("taskId"),
+                "task-instance-id",
+                0,
+                TaskState.RUNNING,
+                URI.create("fake://task/" + "taskId" + "/node/some_node"),
+                "some_node",
+                false,
+                ImmutableList.of(),
+                0,
+                0,
+                new OutputBufferStatus(OptionalLong.empty(), isOutputBufferOverUtilized, false),
+                DataSize.ofBytes(outputDataSize),
+                physicalWrittenDataSize,
+                maxWriterCount,
+                DataSize.of(1, DataSize.Unit.MEGABYTE),
+                DataSize.of(1, DataSize.Unit.MEGABYTE),
+                DataSize.of(0, DataSize.Unit.MEGABYTE),
+                0,
+                Duration.valueOf("0s"),
+                0,
+                1,
+                1);
     }
 
     private static class TestingStageExecution
@@ -280,6 +282,12 @@ public class TestScaledWriterScheduler
 
         @Override
         public int getAttemptId()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Span getStageSpan()
         {
             throw new UnsupportedOperationException();
         }

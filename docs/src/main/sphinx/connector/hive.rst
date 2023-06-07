@@ -13,7 +13,7 @@ Hive connector
     Security <hive-security>
     Amazon S3 <hive-s3>
     Azure Storage <hive-azure>
-    GCS Tutorial <hive-gcs-tutorial>
+    Google Cloud Storage <hive-gcs-tutorial>
     IBM Cloud Object Storage <hive-cos>
     Storage Caching <hive-caching>
     Alluxio <hive-alluxio>
@@ -111,7 +111,7 @@ When not using Kerberos with HDFS, Trino accesses HDFS using the
 OS user of the Trino process. For example, if Trino is running as
 ``nobody``, it accesses HDFS as ``nobody``. You can override this
 username by setting the ``HADOOP_USER_NAME`` system property in the
-Trino :ref:`jvm_config`, replacing ``hdfs_user`` with the
+Trino :ref:`jvm-config`, replacing ``hdfs_user`` with the
 appropriate username:
 
 .. code-block:: text
@@ -125,7 +125,7 @@ Whenever you change the user Trino is using to access HDFS, remove
 ``/tmp/presto-*`` on HDFS, as the new user may not have access to
 the existing temporary directories.
 
-.. _hive_configuration_properties:
+.. _hive-configuration-properties:
 
 Hive general configuration properties
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -192,6 +192,10 @@ Hive connector documentation.
     * - ``hive.create-empty-bucket-files``
       - Should empty files be created for buckets that have no data?
       - ``false``
+    * - ``hive.validate-bucketing``
+      - Enables validation that data is in the correct bucket when reading
+        bucketed tables.
+      - ``true``
     * - ``hive.partition-statistics-sample-size``
       - Specifies the number of partitions to analyze when computing table
         statistics.
@@ -243,19 +247,23 @@ Hive connector documentation.
               in schemas ``fruit`` and ``vegetable``
             * ``*`` to cache listings for all tables in all schemas
       -
-    * - ``hive.file-status-cache-size``
-      - Maximum total number of cached file status entries.
-      - 1,000,000
+    * - ``hive.file-status-cache.max-retained-size``
+      - Maximum retained size of cached file status entries.
+      - ``1GB``
     * - ``hive.file-status-cache-expire-time``
       - How long a cached directory listing is considered valid.
       - ``1m``
+    * - ``hive.per-transaction-file-status-cache.max-retained-size``
+      - Maximum retained size of all entries in per transaction file status cache.
+        Retained size limit is shared across all running queries.
+      - ``100MB``
     * - ``hive.rcfile.time-zone``
       - Adjusts binary encoded timestamp values to a specific time zone. For
         Hive 3.1+, this must be set to UTC.
       - JVM default
     * - ``hive.timestamp-precision``
       - Specifies the precision to use for Hive columns of type ``timestamp``.
-        Possible values are ``MILLISECONDS``, ``MICROSECONDS`` and``NANOSECONDS``.
+        Possible values are ``MILLISECONDS``, ``MICROSECONDS`` and ``NANOSECONDS``.
         Values with higher precision than configured are rounded.
       - ``MILLISECONDS``
     * - ``hive.temporary-staging-directory-enabled``
@@ -309,7 +317,7 @@ Hive connector documentation.
       - ``true``
     * - ``hive.auto-purge``
       - Set the default value for the auto_purge table property for managed
-        tables. See the :ref:`hive_table_properties` for more information on
+        tables. See the :ref:`hive-table-properties` for more information on
         auto_purge.
       - ``false``
     * - ``hive.partition-projection-enabled``
@@ -318,6 +326,10 @@ Hive connector documentation.
     * - ``hive.max-partition-drops-per-query``
       - Maximum number of partitions to drop in a single query.
       - 100,000
+    * - ``hive.single-statement-writes``
+      - Enables auto-commit for all writes. This can be used to disallow
+        multi-statement write transactions.
+      - ``false``
 
 Metastores
 ----------
@@ -385,56 +397,102 @@ Specific properties can be used to further configure the
 Thrift metastore configuration properties
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In order to use a Hive Thrisft metastore, you must configure the metastore with
+In order to use a Hive Thrift metastore, you must configure the metastore with
 ``hive.metastore=thrift`` and provide further details with the following
 properties:
 
 .. list-table:: Thrift metastore configuration properties
-   :widths: 50 50
+   :widths: 35, 50, 15
    :header-rows: 1
 
-   * - Property Name
+   * - Property name
      - Description
+     - Default
    * - ``hive.metastore.uri``
      - The URIs of the Hive metastore to connect to using the Thrift protocol.
        If a comma-separated list of URIs is provided, the first URI is used by
        default, and the rest of the URIs are fallback metastores. This property
        is required. Example: ``thrift://192.0.2.3:9083`` or
        ``thrift://192.0.2.3:9083,thrift://192.0.2.4:9083``
+     -
    * - ``hive.metastore.username``
      - The username Trino uses to access the Hive metastore.
+     -
    * - ``hive.metastore.authentication.type``
      - Hive metastore authentication type. Possible values are ``NONE`` or
-       ``KERBEROS``. Default is ``NONE``.
+       ``KERBEROS``.
+     - ``NONE``
    * - ``hive.metastore.thrift.impersonation.enabled``
      - Enable Hive metastore end user impersonation.
+     -
    * - ``hive.metastore.thrift.use-spark-table-statistics-fallback``
-     - Enable usage of table statistics generated by Apache Spark when hive table statistics are not available
+     - Enable usage of table statistics generated by Apache Spark when Hive
+       table statistics are not available.
+     - ``true``
    * - ``hive.metastore.thrift.delegation-token.cache-ttl``
-     - Time to live delegation token cache for metastore. Default is ``1h``.
+     - Time to live delegation token cache for metastore.
+     - ``1h``
    * - ``hive.metastore.thrift.delegation-token.cache-maximum-size``
-     - Delegation token cache maximum size. Default is ``1000``.
+     - Delegation token cache maximum size.
+     - ``1000``
    * - ``hive.metastore.thrift.client.ssl.enabled``
-     - Use SSL when connecting to metastore. Default is ``false``.
+     - Use SSL when connecting to metastore.
+     - ``false``
    * - ``hive.metastore.thrift.client.ssl.key``
      - Path to private key and client certification (key store).
+     -
    * - ``hive.metastore.thrift.client.ssl.key-password``
      - Password for the private key.
+     -
    * - ``hive.metastore.thrift.client.ssl.trust-certificate``
      - Path to the server certificate chain (trust store). Required when SSL is
        enabled.
+     -
    * - ``hive.metastore.thrift.client.ssl.trust-certificate-password``
      - Password for the trust store.
+     -
    * - ``hive.metastore.service.principal``
      - The Kerberos principal of the Hive metastore service.
+     -
    * - ``hive.metastore.client.principal``
      - The Kerberos principal that Trino uses when connecting to the Hive
        metastore service.
+     -
    * - ``hive.metastore.client.keytab``
      - Hive metastore client keytab location.
+     -
    * - ``hive.metastore.thrift.delete-files-on-drop``
-     - Actively delete the files for drop table or partition operations, for cases when the
-       metastore does not delete the files. Default is ``false``.
+     - Actively delete the files for managed tables when performing drop table
+       or partition operations, for cases when the metastore does not delete the
+       files.
+     - ``false``
+   * - ``hive.metastore.thrift.assume-canonical-partition-keys``
+     - Allow the metastore to assume that the values of partition columns can be
+       converted to string values. This can lead to performance improvements in
+       queries which apply filters on the partition columns. Partition keys with
+       a ``timestamp`` type do not get canonicalized.
+     - ``false``
+   * - ``hive.metastore.thrift.client.socks-proxy``
+     - SOCKS proxy to use for the Thrift Hive metastore.
+     -
+   * - ``hive.metastore.thrift.client.max-retries``
+     - Maximum number of retry attempts for metastore requests.
+     - ``9``
+   * - ``hive.metastore.thrift.client.backoff-scale-factor``
+     - Scale factor for metastore request retry delay.
+     - ``2.0``
+   * - ``hive.metastore.thrift.client.max-retry-time``
+     - Total allowed time limit for a metastore request to be retried.
+     - ``30s``
+   * - ``hive.metastore.thrift.client.min-backoff-delay``
+     - Minimum delay between metastore request retries.
+     - ``1s``
+   * - ``hive.metastore.thrift.client.max-backoff-delay``
+     - Maximum delay between metastore request retries.
+     - ``1s``
+   * - ``hive.metastore.thrift.txn-lock-max-wait``
+     - Maximum time to wait to acquire hive transaction lock.
+     - ``10m``
 
 .. _hive-glue-metastore:
 
@@ -524,7 +582,7 @@ properties:
       - Number of threads for parallel statistic writes to Glue.
       - ``5``
 
-.. _partition_projection:
+.. _partition-projection:
 
 Accessing tables with Athena partition projection metadata
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -543,7 +601,7 @@ you have partition projection enabled, you can set the
 ``partition_projection_ignore`` table property to ``true`` for a table to bypass
 any errors.
 
-Refer to :ref:`hive_table_properties` and :ref:`hive_column_properties` for
+Refer to :ref:`hive-table-properties` and :ref:`hive-column-properties` for
 configuration of partition projection.
 
 Metastore configuration for Avro
@@ -568,37 +626,10 @@ The Hive connector supports the following storage options:
 
 * :doc:`Amazon S3 <hive-s3>`
 * :doc:`Azure Storage <hive-azure>`
-* Google Cloud Storage
-
-  * :ref:`properties <hive-google-cloud-storage-configuration>`
-  * :doc:`tutorial <hive-gcs-tutorial>`
-
+* :doc:`Google Cloud Storage <hive-gcs-tutorial>`
 * :doc:`IBM Cloud Object Storage <hive-cos>`
 
 The Hive connector also supports :doc:`storage caching <hive-caching>`.
-
-.. _hive-google-cloud-storage-configuration:
-
-Google Cloud Storage configuration
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-The Hive connector can access data stored in GCS, using the ``gs://`` URI prefix.
-Please refer to the :doc:`hive-gcs-tutorial` for step-by-step instructions.
-
-GCS configuration properties
-""""""""""""""""""""""""""""
-
-.. list-table:: Google Cloud Storage configuration properties
-    :widths: 35, 65
-    :header-rows: 1
-
-    * - Property Name
-      - Description
-    * - ``hive.gcs.json-key-file-path``
-      - JSON key file used to authenticate with Google Cloud Storage.
-    * - ``hive.gcs.use-access-token``
-      - Use client-provided OAuth token to access Google Cloud Storage. This is
-        mutually exclusive with a global JSON key file.
 
 Security
 --------
@@ -635,7 +666,7 @@ on migrating from Hive to Trino.
 
 The following sections provide Hive-specific information regarding SQL support.
 
-.. _hive_examples:
+.. _hive-examples:
 
 Basic usage examples
 ^^^^^^^^^^^^^^^^^^^^
@@ -771,7 +802,7 @@ The following procedures are available:
   ``create_empty_partition``). If ``partition_values`` argument is omitted, stats are dropped for the
   entire table.
 
-.. _register_partition:
+.. _register-partition:
 
 * ``system.register_partition(schema_name, table_name, partition_columns, partition_values, location)``
 
@@ -783,14 +814,14 @@ The following procedures are available:
   Due to security reasons, the procedure is enabled only when ``hive.allow-register-partition-procedure``
   is set to ``true``.
 
-.. _unregister_partition:
+.. _unregister-partition:
 
 * ``system.unregister_partition(schema_name, table_name, partition_columns, partition_values)``
 
   Unregisters given, existing partition in the metastore for the specified table.
   The partition data is not deleted.
 
-.. _hive_flush_metadata_cache:
+.. _hive-flush-metadata-cache:
 
 * ``system.flush_metadata_cache()``
 
@@ -863,7 +894,7 @@ as Hive. For example, converting the string ``'foo'`` to a number,
 or converting the string ``'1234'`` to a ``tinyint`` (which has a
 maximum value of ``127``).
 
-.. _hive_avro_schema:
+.. _hive-avro-schema:
 
 Avro schema evolution
 """""""""""""""""""""
@@ -873,15 +904,25 @@ format, which has the schema set based on an Avro schema file/literal. Trino is
 also capable of creating the tables in Trino by infering the schema from a
 valid Avro schema file located locally, or remotely in HDFS/Web server.
 
-To specify that the Avro schema must be used for interpreting table's data one must use ``avro_schema_url`` table property.
-The schema can be placed remotely in
-HDFS (e.g. ``avro_schema_url = 'hdfs://user/avro/schema/avro_data.avsc'``),
-S3 (e.g. ``avro_schema_url = 's3n:///schema_bucket/schema/avro_data.avsc'``),
-a web server (e.g. ``avro_schema_url = 'http://example.org/schema/avro_data.avsc'``)
-as well as local file system. This URL, where the schema is located, must be accessible from the
-Hive metastore and Trino coordinator/worker nodes.
+To specify that the Avro schema should be used for interpreting table data, use
+the ``avro_schema_url`` table property.
 
-The table created in Trino using ``avro_schema_url`` behaves the same way as a Hive table with ``avro.schema.url`` or ``avro.schema.literal`` set.
+The schema can be placed in the local file system or remotely in the following
+locations:
+
+- HDFS (e.g. ``avro_schema_url = 'hdfs://user/avro/schema/avro_data.avsc'``)
+- S3 (e.g. ``avro_schema_url = 's3n:///schema_bucket/schema/avro_data.avsc'``)
+- A web server (e.g. ``avro_schema_url = 'http://example.org/schema/avro_data.avsc'``)
+
+The URL, where the schema is located, must be accessible from the Hive metastore
+and Trino coordinator/worker nodes.
+
+Alternatively, you can use the table property ``avro_schema_literal`` to define
+the Avro schema.
+
+The table created in Trino using the ``avro_schema_url`` or
+``avro_schema_literal`` property behaves the same way as a Hive table with
+``avro.schema.url`` or ``avro.schema.literal`` set.
 
 Example::
 
@@ -983,7 +1024,7 @@ session property:
     to the Trino logs and query failure messages to see which files must be
     deleted.
 
-.. _hive_table_properties:
+.. _hive-table-properties:
 
 Table properties
 """"""""""""""""
@@ -1008,7 +1049,7 @@ to the connector using a :doc:`WITH </sql/create-table-as>` clause::
       partition is deleted instead of a soft deletion using the trash.
     -
   * - ``avro_schema_url``
-    - The URI pointing to :ref:`hive_avro_schema` for the table.
+    - The URI pointing to :ref:`hive-avro-schema` for the table.
     -
   * - ``bucket_count``
     - The number of buckets to group data into. Only valid if used with
@@ -1035,7 +1076,7 @@ to the connector using a :doc:`WITH </sql/create-table-as>` clause::
     - ``,``
   * - ``external_location``
     - The URI for an external Hive table on S3, Azure Blob Storage, etc. See the
-      :ref:`hive_examples` for more information.
+      :ref:`hive-examples` for more information.
     -
   * - ``format``
     - The table file format. Valid values include ``ORC``, ``PARQUET``,
@@ -1101,8 +1142,13 @@ to the connector using a :doc:`WITH </sql/create-table-as>` clause::
       ``s3a://test/name=${name}/``. Mapped from the AWS Athena table property
       `storage.location.template <https://docs.aws.amazon.com/athena/latest/ug/partition-projection-setting-up.html#partition-projection-specifying-custom-s3-storage-locations>`_
     - ``${table_location}/${partition_name}``
+  * - ``extra_properties``
+    - Additional properties added to a Hive table. The properties are not used by Trino,
+      and are available in the ``$properties`` metadata table.
+      The properties are not included in the output of ``SHOW CREATE TABLE`` statements.
+    -
 
-.. _hive_special_tables:
+.. _hive-special-tables:
 
 Metadata tables
 """""""""""""""
@@ -1116,7 +1162,7 @@ You can inspect the property names and values with a simple query::
 
     SELECT * FROM example.web."page_views$properties";
 
-.. _hive_column_properties:
+.. _hive-column-properties:
 
 Column properties
 """""""""""""""""
@@ -1182,7 +1228,7 @@ Column properties
       `projection.${columnName}.interval.unit <https://docs.aws.amazon.com/athena/latest/ug/partition-projection-supported-types.html>`_.
     -
 
-.. _hive_special_columns:
+.. _hive-special-columns:
 
 Metadata columns
 """"""""""""""""
@@ -1306,6 +1352,19 @@ functionality:
 * Support all Hive data types and correct mapping to Trino types
 * Ability to process custom UDFs
 
+.. _hive-fte-support:
+
+Fault-tolerant execution support
+--------------------------------
+
+The connector supports :doc:`/admin/fault-tolerant-execution` of query
+processing. Read and write operations are both supported with any retry policy
+on non-transactional tables.
+
+Read operations are supported with any retry policy on transactional tables.
+Write operations and ``CREATE TABLE ... AS`` operations are not supported with
+any retry policy on transactional tables.
+
 Performance
 -----------
 
@@ -1355,7 +1414,7 @@ and by default will also collect column level statistics:
     * - ``BOOLEAN``
       - Number of nulls, number of true/false values
 
-.. _hive_analyze:
+.. _hive-analyze:
 
 Updating table and partition statistics
 """""""""""""""""""""""""""""""""""""""
@@ -1400,7 +1459,7 @@ You can also drop statistics for selected partitions only::
         table_name => 'table',
         partition_values => ARRAY[ARRAY['p2_value1', 'p2_value2']])
 
-.. _hive_dynamic_filtering:
+.. _hive-dynamic-filtering:
 
 Dynamic filtering
 ^^^^^^^^^^^^^^^^^
@@ -1536,6 +1595,9 @@ with ORC files performed by the Hive connector.
     * - ``hive.orc.bloom-filters.enabled``
       - Enable bloom filters for predicate pushdown.
       - ``false``
+    * - ``hive.orc.read-legacy-short-zone-id``
+      - Allow reads on ORC files with short zone ID in the stripe footer.
+      - ``false``
 
 .. _hive-parquet-configuration:
 
@@ -1570,10 +1632,10 @@ with Parquet files performed by the Hive connector.
       - ``true``
     * - ``parquet.optimized-writer.enabled``
       - Whether the optimized writer is used when writing Parquet files.
-        Set this property to ``true`` to use the optimized parquet writer by
+        Set this property to ``false`` to disable the optimized parquet writer by
         default. The equivalent catalog session property is
         ``parquet_optimized_writer_enabled``.
-      - ``false``
+      - ``true``
     * - ``parquet.optimized-writer.validation-percentage``
       - Percentage of parquet files to validate after write by re-reading the whole file
         when ``parquet.optimized-writer.enabled`` is set to ``true``.

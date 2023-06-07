@@ -17,6 +17,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
+import io.trino.filesystem.Location;
 import io.trino.plugin.hive.metastore.StorageFormat;
 import io.trino.spi.Page;
 import io.trino.spi.PageBuilder;
@@ -63,7 +64,6 @@ import org.apache.hadoop.mapred.JobConf;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.format.DateTimeFormat;
-import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.IOException;
@@ -146,7 +146,6 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
 
-@Test(groups = "hive")
 public abstract class AbstractTestHiveFileFormats
 {
     protected static final DateTimeZone HIVE_STORAGE_TIME_ZONE = DateTimeZone.forID("America/Bahia_Banderas");
@@ -562,9 +561,6 @@ public abstract class AbstractTestHiveFileFormats
         }
         Page page = pageBuilder.build();
 
-        JobConf jobConf = new JobConf(newEmptyConfiguration());
-        configureCompression(jobConf, compressionCodec);
-
         Properties tableProperties = new Properties();
         tableProperties.setProperty(
                 "columns",
@@ -579,13 +575,13 @@ public abstract class AbstractTestHiveFileFormats
                         .collect(Collectors.joining(",")));
 
         Optional<FileWriter> fileWriter = fileWriterFactory.createFileWriter(
-                new Path(filePath),
+                Location.of(filePath),
                 testColumns.stream()
                         .map(TestColumn::getName)
                         .collect(toList()),
                 StorageFormat.fromHiveStorageFormat(storageFormat),
+                compressionCodec,
                 tableProperties,
-                jobConf,
                 session,
                 OptionalInt.empty(),
                 NO_ACID_TRANSACTION,

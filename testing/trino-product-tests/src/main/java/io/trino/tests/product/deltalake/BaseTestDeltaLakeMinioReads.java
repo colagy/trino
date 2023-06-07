@@ -13,8 +13,8 @@
  */
 package io.trino.tests.product.deltalake;
 
-import io.trino.tempto.AfterTestWithContext;
-import io.trino.tempto.BeforeTestWithContext;
+import io.trino.tempto.AfterMethodWithContext;
+import io.trino.tempto.BeforeMethodWithContext;
 import io.trino.tempto.ProductTest;
 import io.trino.testing.minio.MinioClient;
 import org.testng.annotations.Test;
@@ -50,7 +50,7 @@ public abstract class BaseTestDeltaLakeMinioReads
         this.regionResourcePath = requireNonNull(regionResourcePath, "regionResourcePath is null");
     }
 
-    @BeforeTestWithContext
+    @BeforeMethodWithContext
     public void setUp()
     {
         client = new MinioClient();
@@ -62,7 +62,7 @@ public abstract class BaseTestDeltaLakeMinioReads
         client.captureBucketNotifications(BUCKET_NAME, notification -> recordNotification(NOTIFICATIONS_TABLE, notification));
     }
 
-    @AfterTestWithContext
+    @AfterMethodWithContext
     public void tearDown()
     {
         deleteNotificationsTable(NOTIFICATIONS_TABLE);
@@ -76,7 +76,7 @@ public abstract class BaseTestDeltaLakeMinioReads
         onTrino().executeQuery(format("CALL delta.system.register_table('default', '%1$s', 's3://%2$s/%1$s')", tableName, BUCKET_NAME));
 
         assertThat(onTrino().executeQuery(
-                format("SELECT count(*) FROM delta.default.\"%s\"", tableName)))
+                format("SELECT count(name) FROM delta.default.\"%s\"", tableName)))
                 .containsOnly(row(5L));
 
         assertNotificationsCount(NOTIFICATIONS_TABLE, OBJECT_ACCESSED_HEAD, tableName + "/_delta_log/00000000000000000000.json", 0);

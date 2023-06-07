@@ -13,12 +13,11 @@
  */
 package io.trino.tests.product.hive;
 
+import com.google.inject.Inject;
 import com.google.inject.name.Named;
 import io.trino.tempto.ProductTest;
 import io.trino.tempto.hadoop.hdfs.HdfsClient;
 import org.testng.annotations.Test;
-
-import javax.inject.Inject;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -137,9 +136,9 @@ public class TestAvroSymlinkInputFormat
                 "OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'");
 
         String tableRoot = warehouseDirectory + '/' + table;
-        String dataDir = warehouseDirectory + "/data_test_avro_symlink_with_nested_directory";
+        String dataDir = warehouseDirectory + "/data_test_avro_symlink_with_nested_directory/nested_directory";
         saveResourceOnHdfs("avro/original_data.avro", dataDir + "/original_data.avro");
-        hdfsClient.saveFile(tableRoot + "/symlink.txt", format("hdfs://%s/", dataDir));
+        hdfsClient.saveFile(tableRoot + "/symlink.txt", format("hdfs://%s/original_data.avro", dataDir));
         assertThat(onTrino().executeQuery("SELECT * FROM " + table)).containsExactlyInOrder(row("someValue", 1));
 
         onHive().executeQuery("DROP TABLE " + table);

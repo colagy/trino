@@ -14,26 +14,23 @@
 package io.trino.plugin.deltalake.procedure;
 
 import com.google.common.collect.ImmutableList;
+import com.google.inject.Inject;
+import com.google.inject.Provider;
+import io.trino.plugin.deltalake.DeltaLakeMetadata;
+import io.trino.plugin.deltalake.DeltaLakeMetadataFactory;
+import io.trino.plugin.deltalake.LocatedTableHandle;
+import io.trino.plugin.deltalake.statistics.CachingExtendedStatisticsAccess;
 import io.trino.plugin.deltalake.transactionlog.TransactionLogAccess;
-import io.trino.plugin.hive.metastore.HiveMetastore;
-import io.trino.plugin.hive.metastore.HiveMetastoreFactory;
-import io.trino.plugin.hive.metastore.Table;
 import io.trino.plugin.hive.metastore.cache.CachingHiveMetastore;
 import io.trino.spi.TrinoException;
 import io.trino.spi.classloader.ThreadContextClassLoader;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.SchemaTableName;
-import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.procedure.Procedure;
-
-import javax.inject.Inject;
-import javax.inject.Provider;
 
 import java.lang.invoke.MethodHandle;
 import java.util.Optional;
 
-import static io.trino.plugin.deltalake.metastore.HiveMetastoreBackedDeltaLakeMetastore.getTableLocation;
-import static io.trino.plugin.deltalake.metastore.HiveMetastoreBackedDeltaLakeMetastore.verifyDeltaLakeTable;
 import static io.trino.spi.StandardErrorCode.INVALID_PROCEDURE_ARGUMENT;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static java.lang.invoke.MethodHandles.lookup;
@@ -47,10 +44,6 @@ public class FlushMetadataCacheProcedure
     private static final String PARAM_SCHEMA_NAME = "SCHEMA_NAME";
     private static final String PARAM_TABLE_NAME = "TABLE_NAME";
 
-    private final HiveMetastoreFactory metastoreFactory;
-    private final Optional<CachingHiveMetastore> cachingHiveMetastore;
-    private final TransactionLogAccess transactionLogAccess;
-
     private static final MethodHandle FLUSH_METADATA_CACHE;
 
     static {
@@ -62,15 +55,22 @@ public class FlushMetadataCacheProcedure
         }
     }
 
+    private final DeltaLakeMetadataFactory metadataFactory;
+    private final Optional<CachingHiveMetastore> cachingHiveMetastore;
+    private final TransactionLogAccess transactionLogAccess;
+    private final CachingExtendedStatisticsAccess extendedStatisticsAccess;
+
     @Inject
     public FlushMetadataCacheProcedure(
-            HiveMetastoreFactory metastoreFactory,
+            DeltaLakeMetadataFactory metadataFactory,
             Optional<CachingHiveMetastore> cachingHiveMetastore,
-            TransactionLogAccess transactionLogAccess)
+            TransactionLogAccess transactionLogAccess,
+            CachingExtendedStatisticsAccess extendedStatisticsAccess)
     {
-        this.metastoreFactory = requireNonNull(metastoreFactory, "metastoreFactory is null");
+        this.metadataFactory = requireNonNull(metadataFactory, "metadataFactory is null");
         this.cachingHiveMetastore = requireNonNull(cachingHiveMetastore, "cachingHiveMetastore is null");
         this.transactionLogAccess = requireNonNull(transactionLogAccess, "transactionLogAccess is null");
+        this.extendedStatisticsAccess = requireNonNull(extendedStatisticsAccess, "extendedStatisticsAccess is null");
     }
 
     @Override
@@ -98,14 +98,18 @@ public class FlushMetadataCacheProcedure
         if (schemaName.isEmpty() && tableName.isEmpty()) {
             cachingHiveMetastore.ifPresent(CachingHiveMetastore::flushCache);
             transactionLogAccess.flushCache();
+            extendedStatisticsAccess.invalidateCache();
         }
         else if (schemaName.isPresent() && tableName.isPresent()) {
-            HiveMetastore metastore = metastoreFactory.createMetastore(Optional.of(session.getIdentity()));
-            Table table = metastore.getTable(schemaName.get(), tableName.get())
-                            .orElseThrow(() -> new TableNotFoundException(new SchemaTableName(schemaName.get(), tableName.get())));
-            verifyDeltaLakeTable(table);
-            cachingHiveMetastore.ifPresent(caching -> caching.invalidateTable(table.getDatabaseName(), table.getTableName()));
-            transactionLogAccess.invalidateCaches(getTableLocation(table));
+            DeltaLakeMetadata metadata = metadataFactory.create(session.getIdentity());
+            SchemaTableName schemaTableName = new SchemaTableName(schemaName.get(), tableName.get());
+            // This may insert into a cache, but this will get invalidated below. TODO fix Delta so that flush_metadata_cache doesn't have to read from metastore
+            LocatedTableHandle tableHandle = metadata.getTableHandle(session, schemaTableName);
+            cachingHiveMetastore.ifPresent(caching -> caching.invalidateTable(schemaName.get(), tableName.get()));
+
+            Optional<String> tableLocation = Optional.ofNullable(tableHandle).map(LocatedTableHandle::location);
+            tableLocation.ifPresent(transactionLogAccess::invalidateCaches);
+            tableLocation.ifPresent(extendedStatisticsAccess::invalidateCache);
         }
         else {
             throw new TrinoException(INVALID_PROCEDURE_ARGUMENT, "Illegal parameter set passed");

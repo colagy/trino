@@ -68,7 +68,7 @@ public abstract class BaseDeltaLakeRegisterTableProcedureTest
         this.dataDirectory = queryRunner.getCoordinator().getBaseDataDir().resolve("delta_lake_data");
         this.metastore = createTestMetastore(dataDirectory);
 
-        queryRunner.installPlugin(new TestingDeltaLakePlugin(Optional.of(new TestingDeltaLakeMetastoreModule(metastore)), EMPTY_MODULE));
+        queryRunner.installPlugin(new TestingDeltaLakePlugin(Optional.of(new TestingDeltaLakeMetastoreModule(metastore)), Optional.empty(), EMPTY_MODULE));
 
         Map<String, String> connectorProperties = ImmutableMap.<String, String>builder()
                 .put("delta.unique-table-location", "true")
@@ -228,10 +228,10 @@ public abstract class BaseDeltaLakeRegisterTableProcedureTest
         // Delete files under transaction log directory and put an invalid log file to verify register_table call fails
         String transactionLogDir = new URI(getTransactionLogDir(tableLocation)).getPath();
         deleteDirectoryContents(Path.of(transactionLogDir), ALLOW_INSECURE);
-        new File(getTransactionLogJsonEntryPath(transactionLogDir, 0)).createNewFile();
+        new File("/" + getTransactionLogJsonEntryPath(transactionLogDir, 0).path()).createNewFile();
 
         assertQueryFails(format("CALL system.register_table('%s', '%s', '%s')", SCHEMA, tableNameNew, tableLocation),
-                ".*Failed to access table location: (.*)");
+                ".*Metadata not found in transaction log for (.*)");
 
         deleteRecursively(Path.of(new URI(tableLocation).getPath()), ALLOW_INSECURE);
         metastore.dropTable(SCHEMA, tableName, false);

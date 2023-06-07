@@ -650,8 +650,9 @@ public abstract class BaseJdbcClient
             }
 
             RemoteTableName remoteTableName = new RemoteTableName(Optional.ofNullable(catalog), Optional.ofNullable(remoteSchema), remoteTargetTableName);
-            String sql = createTableSql(remoteTableName, columnList.build(), tableMetadata);
-            execute(session, connection, sql);
+            for (String sql : createTableSqls(remoteTableName, columnList.build(), tableMetadata)) {
+                execute(session, connection, sql);
+            }
 
             return new JdbcOutputTableHandle(
                     catalog,
@@ -665,6 +666,12 @@ public abstract class BaseJdbcClient
         }
     }
 
+    protected List<String> createTableSqls(RemoteTableName remoteTableName, List<String> columns, ConnectorTableMetadata tableMetadata)
+    {
+        return ImmutableList.of(createTableSql(remoteTableName, columns, tableMetadata));
+    }
+
+    @Deprecated
     protected String createTableSql(RemoteTableName remoteTableName, List<String> columns, ConnectorTableMetadata tableMetadata)
     {
         if (tableMetadata.getComment().isPresent()) {
@@ -883,7 +890,7 @@ public abstract class BaseJdbcClient
 
         // We conditionally create more than the one table, so keep a list of the tables that need to be dropped.
         Closer closer = Closer.create();
-        closer.register(() -> dropTable(session, temporaryTable));
+        closer.register(() -> dropTable(session, temporaryTable, true));
 
         try (Connection connection = getConnection(session, handle)) {
             verify(connection.getAutoCommit());
@@ -899,7 +906,7 @@ public abstract class BaseJdbcClient
 
             if (handle.getPageSinkIdColumnName().isPresent()) {
                 RemoteTableName pageSinkTable = constructPageSinkIdsTable(session, connection, handle, pageSinkIds);
-                closer.register(() -> dropTable(session, pageSinkTable));
+                closer.register(() -> dropTable(session, pageSinkTable, true));
 
                 insertSql += format(" WHERE EXISTS (SELECT 1 FROM %s page_sink_table WHERE page_sink_table.%s = temp_table.%s)",
                         quoted(pageSinkTable),
@@ -1027,10 +1034,10 @@ public abstract class BaseJdbcClient
     public void dropTable(ConnectorSession session, JdbcTableHandle handle)
     {
         verify(handle.getAuthorization().isEmpty(), "Unexpected authorization is required for table: %s".formatted(handle));
-        dropTable(session, handle.asPlainTable().getRemoteTableName());
+        dropTable(session, handle.asPlainTable().getRemoteTableName(), false);
     }
 
-    protected void dropTable(ConnectorSession session, RemoteTableName remoteTableName)
+    protected void dropTable(ConnectorSession session, RemoteTableName remoteTableName, boolean temporaryTable)
     {
         String sql = "DROP TABLE " + quoted(remoteTableName);
         execute(session, sql);
@@ -1040,10 +1047,12 @@ public abstract class BaseJdbcClient
     public void rollbackCreateTable(ConnectorSession session, JdbcOutputTableHandle handle)
     {
         if (handle.getTemporaryTableName().isPresent()) {
-            dropTable(session, new JdbcTableHandle(
-                    new SchemaTableName(handle.getSchemaName(), handle.getTemporaryTableName().get()),
-                    new RemoteTableName(Optional.ofNullable(handle.getCatalogName()), Optional.ofNullable(handle.getSchemaName()), handle.getTemporaryTableName().get()),
-                    Optional.empty()));
+            dropTable(session,
+                    new RemoteTableName(
+                            Optional.ofNullable(handle.getCatalogName()),
+                            Optional.ofNullable(handle.getSchemaName()),
+                            handle.getTemporaryTableName().get()),
+                    true);
         }
     }
 

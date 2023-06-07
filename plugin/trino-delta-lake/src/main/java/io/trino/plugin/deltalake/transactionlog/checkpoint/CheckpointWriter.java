@@ -50,6 +50,7 @@ import java.util.Optional;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static io.airlift.slice.Slices.utf8Slice;
 import static io.trino.plugin.deltalake.transactionlog.DeltaLakeParquetStatisticsUtils.jsonValueToTrinoValue;
@@ -96,8 +97,10 @@ public class CheckpointWriter
         // The default value is false in https://github.com/delta-io/delta/blob/master/PROTOCOL.md#checkpoint-format, but Databricks defaults to true
         boolean writeStatsAsStruct = Boolean.parseBoolean(configuration.getOrDefault(DELTA_CHECKPOINT_WRITE_STATS_AS_STRUCT_PROPERTY, "true"));
 
+        ProtocolEntry protocolEntry = entries.getProtocolEntry();
+
         RowType metadataEntryType = checkpointSchemaManager.getMetadataEntryType();
-        RowType protocolEntryType = checkpointSchemaManager.getProtocolEntryType();
+        RowType protocolEntryType = checkpointSchemaManager.getProtocolEntryType(protocolEntry.getReaderFeatures().isPresent(), protocolEntry.getWriterFeatures().isPresent());
         RowType txnEntryType = checkpointSchemaManager.getTxnEntryType();
         RowType addEntryType = checkpointSchemaManager.getAddEntryType(entries.getMetadataEntry(), writeStatsAsJson, writeStatsAsStruct);
         RowType removeEntryType = checkpointSchemaManager.getRemoveEntryType();
@@ -177,8 +180,15 @@ public class CheckpointWriter
         pageBuilder.declarePosition();
         BlockBuilder blockBuilder = pageBuilder.getBlockBuilder(PROTOCOL_BLOCK_CHANNEL);
         BlockBuilder entryBlockBuilder = blockBuilder.beginBlockEntry();
-        writeLong(entryBlockBuilder, entryType, 0, "minReaderVersion", (long) protocolEntry.getMinReaderVersion());
-        writeLong(entryBlockBuilder, entryType, 1, "minWriterVersion", (long) protocolEntry.getMinWriterVersion());
+        int fieldId = 0;
+        writeLong(entryBlockBuilder, entryType, fieldId++, "minReaderVersion", (long) protocolEntry.getMinReaderVersion());
+        writeLong(entryBlockBuilder, entryType, fieldId++, "minWriterVersion", (long) protocolEntry.getMinWriterVersion());
+        if (protocolEntry.getReaderFeatures().isPresent()) {
+            writeStringList(entryBlockBuilder, entryType, fieldId++, "readerFeatures", protocolEntry.getReaderFeatures().get().stream().collect(toImmutableList()));
+        }
+        if (protocolEntry.getWriterFeatures().isPresent()) {
+            writeStringList(entryBlockBuilder, entryType, fieldId++, "writerFeatures", protocolEntry.getWriterFeatures().get().stream().collect(toImmutableList()));
+        }
         blockBuilder.closeEntry();
 
         // null for others
@@ -247,7 +257,7 @@ public class CheckpointWriter
     private Map<String, Type> getColumnTypeMapping(MetadataEntry deltaMetadata)
     {
         return extractSchema(deltaMetadata, typeManager).stream()
-                .collect(toImmutableMap(DeltaLakeColumnMetadata::getName, DeltaLakeColumnMetadata::getType));
+                .collect(toImmutableMap(DeltaLakeColumnMetadata::getPhysicalName, DeltaLakeColumnMetadata::getPhysicalColumnType));
     }
 
     private Optional<String> getStatsString(DeltaLakeJsonFileStatistics parsedStats)
@@ -306,11 +316,11 @@ public class CheckpointWriter
     {
         RowType.Field valuesField = validateAndGetField(type, fieldId, fieldName);
         RowType valuesFieldType = (RowType) valuesField.getType();
-        BlockBuilder fieldBlockBuilder = blockBuilder.beginBlockEntry();
         if (values.isEmpty()) {
             blockBuilder.appendNull();
         }
         else {
+            BlockBuilder fieldBlockBuilder = blockBuilder.beginBlockEntry();
             for (RowType.Field valueField : valuesFieldType.getFields()) {
                 // anonymous row fields are not expected here
                 Object value = values.get().get(valueField.getName().orElseThrow());
@@ -333,8 +343,8 @@ public class CheckpointWriter
                     writeNativeValue(valueField.getType(), fieldBlockBuilder, value);
                 }
             }
+            blockBuilder.closeEntry();
         }
-        blockBuilder.closeEntry();
     }
 
     private Optional<Map<String, Object>> preprocessMinMaxValues(RowType valuesType, Optional<Map<String, Object>> valuesOptional, boolean isJson)
@@ -369,16 +379,16 @@ public class CheckpointWriter
     {
         return valuesOptional.map(
                 values ->
-                    values.entrySet().stream()
-                            .collect(toMap(
-                                    Map.Entry::getKey,
-                                    entry -> {
-                                        Object value = entry.getValue();
-                                        if (value instanceof Integer) {
-                                            return (long) (int) value;
-                                        }
-                                        return value;
-                                    })));
+                        values.entrySet().stream()
+                                .collect(toMap(
+                                        Map.Entry::getKey,
+                                        entry -> {
+                                            Object value = entry.getValue();
+                                            if (value instanceof Integer) {
+                                                return (long) (int) value;
+                                            }
+                                            return value;
+                                        })));
     }
 
     private void writeRemoveFileEntry(PageBuilder pageBuilder, RowType entryType, RemoveFileEntry removeFileEntry)
@@ -447,7 +457,7 @@ public class CheckpointWriter
                 mapBuilder.appendNull();
             }
             else {
-                mapType.getKeyType().writeSlice(mapBuilder, utf8Slice(entry.getValue()));
+                mapType.getValueType().writeSlice(mapBuilder, utf8Slice(entry.getValue()));
             }
         }
         blockBuilder.closeEntry();

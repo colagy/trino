@@ -16,20 +16,18 @@ package io.trino.plugin.iceberg;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.airlift.units.DataSize;
 import io.trino.spi.connector.ConnectorTableHandle;
-import io.trino.spi.connector.RetryMode;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.predicate.TupleDomain;
 
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 
 import static java.util.Objects.requireNonNull;
@@ -43,19 +41,20 @@ public class IcebergTableHandle
     private final TableType tableType;
     private final Optional<Long> snapshotId;
     private final String tableSchemaJson;
-    private final List<TrinoSortField> sortOrder;
     // Empty means the partitioning spec is not known (can be the case for certain time travel queries).
     private final Optional<String> partitionSpecJson;
     private final int formatVersion;
     private final String tableLocation;
     private final Map<String, String> storageProperties;
-    private final RetryMode retryMode;
 
     // Filter used during split generation and table scan, but not required to be strictly enforced by Iceberg Connector
     private final TupleDomain<IcebergColumnHandle> unenforcedPredicate;
 
     // Filter guaranteed to be enforced by Iceberg connector
     private final TupleDomain<IcebergColumnHandle> enforcedPredicate;
+
+    // semantically limit is applied after enforcedPredicate
+    private final OptionalLong limit;
 
     private final Set<IcebergColumnHandle> projectedColumns;
     private final Optional<String> nameMappingJson;
@@ -71,16 +70,15 @@ public class IcebergTableHandle
             @JsonProperty("tableType") TableType tableType,
             @JsonProperty("snapshotId") Optional<Long> snapshotId,
             @JsonProperty("tableSchemaJson") String tableSchemaJson,
-            @JsonProperty("sortOrder") List<TrinoSortField> sortOrder,
             @JsonProperty("partitionSpecJson") Optional<String> partitionSpecJson,
             @JsonProperty("formatVersion") int formatVersion,
             @JsonProperty("unenforcedPredicate") TupleDomain<IcebergColumnHandle> unenforcedPredicate,
             @JsonProperty("enforcedPredicate") TupleDomain<IcebergColumnHandle> enforcedPredicate,
+            @JsonProperty("limit") OptionalLong limit,
             @JsonProperty("projectedColumns") Set<IcebergColumnHandle> projectedColumns,
             @JsonProperty("nameMappingJson") Optional<String> nameMappingJson,
             @JsonProperty("tableLocation") String tableLocation,
-            @JsonProperty("storageProperties") Map<String, String> storageProperties,
-            @JsonProperty("retryMode") RetryMode retryMode)
+            @JsonProperty("storageProperties") Map<String, String> storageProperties)
     {
         return new IcebergTableHandle(
                 schemaName,
@@ -88,16 +86,15 @@ public class IcebergTableHandle
                 tableType,
                 snapshotId,
                 tableSchemaJson,
-                sortOrder,
                 partitionSpecJson,
                 formatVersion,
                 unenforcedPredicate,
                 enforcedPredicate,
+                limit,
                 projectedColumns,
                 nameMappingJson,
                 tableLocation,
                 storageProperties,
-                retryMode,
                 false,
                 Optional.empty());
     }
@@ -108,16 +105,15 @@ public class IcebergTableHandle
             TableType tableType,
             Optional<Long> snapshotId,
             String tableSchemaJson,
-            List<TrinoSortField> sortOrder,
             Optional<String> partitionSpecJson,
             int formatVersion,
             TupleDomain<IcebergColumnHandle> unenforcedPredicate,
             TupleDomain<IcebergColumnHandle> enforcedPredicate,
+            OptionalLong limit,
             Set<IcebergColumnHandle> projectedColumns,
             Optional<String> nameMappingJson,
             String tableLocation,
             Map<String, String> storageProperties,
-            RetryMode retryMode,
             boolean recordScannedFiles,
             Optional<DataSize> maxScannedFileSize)
     {
@@ -126,16 +122,15 @@ public class IcebergTableHandle
         this.tableType = requireNonNull(tableType, "tableType is null");
         this.snapshotId = requireNonNull(snapshotId, "snapshotId is null");
         this.tableSchemaJson = requireNonNull(tableSchemaJson, "schemaJson is null");
-        this.sortOrder = ImmutableList.copyOf(requireNonNull(sortOrder, "sortOrder is null"));
         this.partitionSpecJson = requireNonNull(partitionSpecJson, "partitionSpecJson is null");
         this.formatVersion = formatVersion;
         this.unenforcedPredicate = requireNonNull(unenforcedPredicate, "unenforcedPredicate is null");
         this.enforcedPredicate = requireNonNull(enforcedPredicate, "enforcedPredicate is null");
+        this.limit = requireNonNull(limit, "limit is null");
         this.projectedColumns = ImmutableSet.copyOf(requireNonNull(projectedColumns, "projectedColumns is null"));
         this.nameMappingJson = requireNonNull(nameMappingJson, "nameMappingJson is null");
         this.tableLocation = requireNonNull(tableLocation, "tableLocation is null");
         this.storageProperties = ImmutableMap.copyOf(requireNonNull(storageProperties, "storageProperties is null"));
-        this.retryMode = requireNonNull(retryMode, "retryMode is null");
         this.recordScannedFiles = recordScannedFiles;
         this.maxScannedFileSize = requireNonNull(maxScannedFileSize, "maxScannedFileSize is null");
     }
@@ -172,12 +167,6 @@ public class IcebergTableHandle
     }
 
     @JsonProperty
-    public List<TrinoSortField> getSortOrder()
-    {
-        return sortOrder;
-    }
-
-    @JsonProperty
     public Optional<String> getPartitionSpecJson()
     {
         return partitionSpecJson;
@@ -202,6 +191,12 @@ public class IcebergTableHandle
     }
 
     @JsonProperty
+    public OptionalLong getLimit()
+    {
+        return limit;
+    }
+
+    @JsonProperty
     public Set<IcebergColumnHandle> getProjectedColumns()
     {
         return projectedColumns;
@@ -223,12 +218,6 @@ public class IcebergTableHandle
     public Map<String, String> getStorageProperties()
     {
         return storageProperties;
-    }
-
-    @JsonProperty
-    public RetryMode getRetryMode()
-    {
-        return retryMode;
     }
 
     @JsonIgnore
@@ -261,38 +250,15 @@ public class IcebergTableHandle
                 tableType,
                 snapshotId,
                 tableSchemaJson,
-                sortOrder,
                 partitionSpecJson,
                 formatVersion,
                 unenforcedPredicate,
                 enforcedPredicate,
+                limit,
                 projectedColumns,
                 nameMappingJson,
                 tableLocation,
                 storageProperties,
-                retryMode,
-                recordScannedFiles,
-                maxScannedFileSize);
-    }
-
-    public IcebergTableHandle withRetryMode(RetryMode retryMode)
-    {
-        return new IcebergTableHandle(
-                schemaName,
-                tableName,
-                tableType,
-                snapshotId,
-                tableSchemaJson,
-                sortOrder,
-                partitionSpecJson,
-                formatVersion,
-                unenforcedPredicate,
-                enforcedPredicate,
-                projectedColumns,
-                nameMappingJson,
-                tableLocation,
-                storageProperties,
-                retryMode,
                 recordScannedFiles,
                 maxScannedFileSize);
     }
@@ -305,16 +271,15 @@ public class IcebergTableHandle
                 tableType,
                 snapshotId,
                 tableSchemaJson,
-                sortOrder,
                 partitionSpecJson,
                 formatVersion,
                 unenforcedPredicate,
                 enforcedPredicate,
+                limit,
                 projectedColumns,
                 nameMappingJson,
                 tableLocation,
                 storageProperties,
-                retryMode,
                 recordScannedFiles,
                 Optional.of(maxScannedFileSize));
     }
@@ -336,15 +301,14 @@ public class IcebergTableHandle
                 tableType == that.tableType &&
                 Objects.equals(snapshotId, that.snapshotId) &&
                 Objects.equals(tableSchemaJson, that.tableSchemaJson) &&
-                Objects.equals(sortOrder, that.sortOrder) &&
                 Objects.equals(partitionSpecJson, that.partitionSpecJson) &&
                 formatVersion == that.formatVersion &&
                 Objects.equals(unenforcedPredicate, that.unenforcedPredicate) &&
                 Objects.equals(enforcedPredicate, that.enforcedPredicate) &&
+                Objects.equals(limit, that.limit) &&
                 Objects.equals(projectedColumns, that.projectedColumns) &&
                 Objects.equals(nameMappingJson, that.nameMappingJson) &&
                 Objects.equals(tableLocation, that.tableLocation) &&
-                Objects.equals(retryMode, that.retryMode) &&
                 Objects.equals(storageProperties, that.storageProperties) &&
                 Objects.equals(maxScannedFileSize, that.maxScannedFileSize);
     }
@@ -358,16 +322,15 @@ public class IcebergTableHandle
                 tableType,
                 snapshotId,
                 tableSchemaJson,
-                sortOrder,
                 partitionSpecJson,
                 formatVersion,
                 unenforcedPredicate,
                 enforcedPredicate,
+                limit,
                 projectedColumns,
                 nameMappingJson,
                 tableLocation,
                 storageProperties,
-                retryMode,
                 recordScannedFiles,
                 maxScannedFileSize);
     }
@@ -386,6 +349,7 @@ public class IcebergTableHandle
                     .map(IcebergColumnHandle::getQualifiedName)
                     .collect(joining(", ", "[", "]")));
         }
+        limit.ifPresent(limit -> builder.append(" LIMIT ").append(limit));
         return builder.toString();
     }
 }

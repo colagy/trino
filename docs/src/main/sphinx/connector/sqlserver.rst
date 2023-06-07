@@ -331,6 +331,14 @@ supports the following features:
 
 .. include:: alter-table-limitation.fragment
 
+.. _sqlserver-fte-support:
+
+Fault-tolerant execution support
+--------------------------------
+
+The connector supports :doc:`/admin/fault-tolerant-execution` of query
+processing. Read and write operations are both supported with any retry policy.
+
 Table functions
 ---------------
 
@@ -348,7 +356,7 @@ processed in SQL Server. This can be useful for accessing native features which
 are not implemented in Trino or for improving query performance in situations
 where running a query natively may be faster.
 
-.. include:: polymorphic-table-function-ordering.fragment
+.. include:: query-passthrough-warning.fragment
 
 For example, query the ``example`` catalog and select the top 10 percent of
 nations by population::
@@ -411,6 +419,8 @@ append the parameter value to the procedure statement::
           query => 'EXECUTE example_schema.employee_sp 0'
         )
       );
+
+.. include:: query-table-function-ordering.fragment
 
 Performance
 -----------
@@ -480,7 +490,22 @@ The connector supports pushdown for a number of operations:
 
 .. include:: join-pushdown-enabled-true.fragment
 
-.. include:: no-pushdown-text-type.fragment
+Predicate pushdown support
+""""""""""""""""""""""""""
+
+The connector supports pushdown of predicates on ``VARCHAR`` and ``NVARCHAR``
+columns if the underlying columns in SQL Server use a case-sensitive `collation
+<https://learn.microsoft.com/en-us/sql/relational-databases/collations/collation-and-unicode-support?view=sql-server-ver16>`_.
+
+The following operators are pushed down:
+
+- ``=``
+- ``<>``
+- ``IN``
+- ``NOT IN``
+
+To ensure correct results, operators are not pushed down for columns using a
+case-insensitive collation.
 
 .. _sqlserver-bulk-insert:
 

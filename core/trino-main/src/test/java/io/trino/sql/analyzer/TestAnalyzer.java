@@ -107,6 +107,7 @@ import java.util.function.Consumer;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.SessionTestUtils.TEST_SESSION;
+import static io.trino.execution.querystats.PlanOptimizersStatsCollector.createPlanOptimizersStatsCollector;
 import static io.trino.operator.scalar.ApplyFunction.APPLY_FUNCTION;
 import static io.trino.spi.StandardErrorCode.AMBIGUOUS_NAME;
 import static io.trino.spi.StandardErrorCode.CATALOG_NOT_FOUND;
@@ -136,6 +137,7 @@ import static io.trino.spi.StandardErrorCode.INVALID_NAVIGATION_NESTING;
 import static io.trino.spi.StandardErrorCode.INVALID_ORDER_BY;
 import static io.trino.spi.StandardErrorCode.INVALID_PARAMETER_USAGE;
 import static io.trino.spi.StandardErrorCode.INVALID_PARTITION_BY;
+import static io.trino.spi.StandardErrorCode.INVALID_PATH;
 import static io.trino.spi.StandardErrorCode.INVALID_PATTERN_RECOGNITION_FUNCTION;
 import static io.trino.spi.StandardErrorCode.INVALID_PROCESSING_MODE;
 import static io.trino.spi.StandardErrorCode.INVALID_RANGE;
@@ -6176,6 +6178,22 @@ public class TestAnalyzer
     }
 
     @Test
+    public void testJsonPathName()
+    {
+        assertFails("SELECT JSON_EXISTS('[1, 2, 3]', 'lax $[2]' AS path_name)")
+                .hasErrorCode(INVALID_PATH)
+                .hasMessage("line 1:47: JSON path name is not allowed in JSON_EXISTS function");
+
+        assertFails("SELECT JSON_QUERY('[1, 2, 3]', 'lax $[2]' AS path_name)")
+                .hasErrorCode(INVALID_PATH)
+                .hasMessage("line 1:46: JSON path name is not allowed in JSON_QUERY function");
+
+        assertFails("SELECT JSON_VALUE('[1, 2, 3]', 'lax $[2]' AS path_name)")
+                .hasErrorCode(INVALID_PATH)
+                .hasMessage("line 1:46: JSON path name is not allowed in JSON_VALUE function");
+    }
+
+    @Test
     public void testTableFunctionNotFound()
     {
         assertFails("SELECT * FROM TABLE(non_existent_table_function())")
@@ -6655,6 +6673,14 @@ public class TestAnalyzer
                 .hasMessage("Invalid index: 1 of required column from table argument INPUT");
     }
 
+    @Test
+    public void testJsonTable()
+    {
+        assertFails("SELECT * FROM JSON_TABLE('[1, 2, 3]', 'lax $[2]' COLUMNS(o FOR ORDINALITY))")
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:15: JSON_TABLE is not yet supported");
+    }
+
     @BeforeClass
     public void setup()
     {
@@ -7057,12 +7083,13 @@ public class TestAnalyzer
                 tablePropertyManager,
                 analyzePropertyManager,
                 new TableProceduresPropertyManager(CatalogServiceProvider.fail("procedures are not supported in testing analyzer")));
-        AnalyzerFactory analyzerFactory = new AnalyzerFactory(statementAnalyzerFactory, statementRewrite);
+        AnalyzerFactory analyzerFactory = new AnalyzerFactory(statementAnalyzerFactory, statementRewrite, plannerContext.getTracer());
         return analyzerFactory.createAnalyzer(
                 session,
                 emptyList(),
                 emptyMap(),
-                WarningCollector.NOOP);
+                WarningCollector.NOOP,
+                createPlanOptimizersStatsCollector());
     }
 
     private Analysis analyze(@Language("SQL") String query)

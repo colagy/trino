@@ -16,7 +16,7 @@ package io.trino.tests.product.deltalake;
 import com.amazonaws.services.s3.AmazonS3;
 import com.google.inject.Inject;
 import com.google.inject.name.Named;
-import io.trino.tempto.BeforeTestWithContext;
+import io.trino.tempto.BeforeMethodWithContext;
 import io.trino.testng.services.Flaky;
 import org.testng.annotations.Test;
 
@@ -29,6 +29,7 @@ import static io.trino.tests.product.TestGroups.DELTA_LAKE_OSS;
 import static io.trino.tests.product.TestGroups.PROFILE_SPECIFIC_TESTS;
 import static io.trino.tests.product.deltalake.util.DeltaLakeTestUtils.DATABRICKS_COMMUNICATION_FAILURE_ISSUE;
 import static io.trino.tests.product.deltalake.util.DeltaLakeTestUtils.DATABRICKS_COMMUNICATION_FAILURE_MATCH;
+import static io.trino.tests.product.deltalake.util.DeltaLakeTestUtils.dropDeltaTableWithRetry;
 import static io.trino.tests.product.deltalake.util.DeltaLakeTestUtils.removeS3Directory;
 import static io.trino.tests.product.utils.QueryExecutors.onDelta;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
@@ -43,7 +44,7 @@ public class TestDeltaLakeActiveFilesCache
 
     private AmazonS3 s3;
 
-    @BeforeTestWithContext
+    @BeforeMethodWithContext
     public void setup()
     {
         super.setUp();
@@ -67,7 +68,7 @@ public class TestDeltaLakeActiveFilesCache
         assertThat(onTrino().executeQuery("SELECT * FROM delta.default." + tableName)).containsOnly(row(1));
 
         // Recreate the table outside Trino to avoid updating the Trino table active files cache
-        onDelta().executeQuery("DROP TABLE default." + tableName);
+        dropDeltaTableWithRetry("default." + tableName);
         // Delete the contents of the table explicitly from storage (because it has been created as `EXTERNAL`)
         removeS3Directory(s3, bucketName, tableDirectory);
 

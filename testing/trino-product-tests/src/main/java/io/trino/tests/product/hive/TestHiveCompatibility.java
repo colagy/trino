@@ -16,14 +16,13 @@ package io.trino.tests.product.hive;
 import com.google.common.collect.ImmutableList;
 import com.google.common.math.IntMath;
 import com.google.inject.Inject;
+import com.google.inject.name.Named;
 import io.trino.plugin.hive.HiveTimestampPrecision;
 import io.trino.tempto.assertions.QueryAssert;
 import io.trino.tempto.query.QueryResult;
 import io.trino.tests.product.utils.JdbcDriverUtils;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
-
-import javax.inject.Named;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -165,10 +164,6 @@ public class TestHiveCompatibility
     public void testTimestampFieldWrittenByOptimizedParquetWriterCanBeReadByHive()
             throws Exception
     {
-        // only admin user is allowed to change session properties
-        setAdminRole(onTrino().getConnection());
-        setSessionProperty(onTrino().getConnection(), "hive.parquet_optimized_writer_enabled", "true");
-
         String tableName = "parquet_table_timestamp_created_in_trino";
         onTrino().executeQuery("DROP TABLE IF EXISTS " + tableName);
         onTrino().executeQuery("CREATE TABLE " + tableName + "(timestamp_precision varchar, a_timestamp timestamp) WITH (format = 'PARQUET')");
@@ -199,10 +194,6 @@ public class TestHiveCompatibility
     public void testSmallDecimalFieldWrittenByOptimizedParquetWriterCanBeReadByHive()
             throws Exception
     {
-        // only admin user is allowed to change session properties
-        setAdminRole(onTrino().getConnection());
-        setSessionProperty(onTrino().getConnection(), "hive.parquet_optimized_writer_enabled", "true");
-
         String tableName = "parquet_table_small_decimal_created_in_trino";
         onTrino().executeQuery("DROP TABLE IF EXISTS " + tableName);
         onTrino().executeQuery("CREATE TABLE " + tableName + " (a_decimal DECIMAL(5,0)) WITH (format='PARQUET')");

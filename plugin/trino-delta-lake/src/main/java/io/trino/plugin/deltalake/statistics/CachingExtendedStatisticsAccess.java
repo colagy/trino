@@ -15,12 +15,11 @@ package io.trino.plugin.deltalake.statistics;
 
 import com.google.common.cache.Cache;
 import com.google.common.util.concurrent.UncheckedExecutionException;
+import com.google.inject.BindingAnnotation;
 import com.google.inject.Inject;
 import io.trino.collect.cache.EvictableCacheBuilder;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ConnectorSession;
-
-import javax.inject.Qualifier;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
@@ -81,6 +80,11 @@ public class CachingExtendedStatisticsAccess
         cache.invalidate(tableLocation);
     }
 
+    public void invalidateCache()
+    {
+        cache.invalidateAll();
+    }
+
     public void invalidateCache(String tableLocation)
     {
         // for explicit cache invalidation
@@ -89,6 +93,6 @@ public class CachingExtendedStatisticsAccess
 
     @Retention(RUNTIME)
     @Target({FIELD, PARAMETER, METHOD})
-    @Qualifier
-    public @interface ForCachingExtendedStatisticsAccess {};
+    @BindingAnnotation
+    public @interface ForCachingExtendedStatisticsAccess {}
 }

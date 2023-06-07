@@ -16,6 +16,7 @@ package io.trino.server.protocol;
 import com.google.common.collect.Ordering;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.inject.Inject;
 import io.airlift.concurrent.BoundedExecutor;
 import io.airlift.log.Logger;
 import io.airlift.units.DataSize;
@@ -33,7 +34,6 @@ import io.trino.spi.QueryId;
 import io.trino.spi.block.BlockEncodingSerde;
 
 import javax.annotation.PreDestroy;
-import javax.inject.Inject;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
@@ -120,11 +120,7 @@ public class ExecutingStatementResource
                     try {
                         for (QueryId queryId : queries.keySet()) {
                             // forget about this query if the query manager is no longer tracking it
-                            try {
-                                queryManager.getQueryState(queryId);
-                            }
-                            catch (NoSuchElementException e) {
-                                // query is no longer registered
+                            if (!queryManager.hasQuery(queryId)) {
                                 Query query = queries.remove(queryId);
                                 if (query != null) {
                                     query.dispose();

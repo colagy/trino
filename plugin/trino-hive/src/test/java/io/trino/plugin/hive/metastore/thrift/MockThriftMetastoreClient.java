@@ -47,6 +47,7 @@ import org.apache.thrift.TException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
@@ -83,6 +84,7 @@ public class MockThriftMetastoreClient
     private final Map<SchemaTableName, Map<String, Map<String, ColumnStatisticsObj>>> databaseTablePartitionColumnStatistics = new HashMap<>();
 
     private boolean throwException;
+    private boolean returnTable = true;
 
     public MockThriftMetastoreClient()
     {
@@ -145,6 +147,11 @@ public class MockThriftMetastoreClient
         this.throwException = throwException;
     }
 
+    public void setReturnTable(boolean returnTable)
+    {
+        this.returnTable = returnTable;
+    }
+
     public int getAccessCount()
     {
         return accessCount.get();
@@ -174,7 +181,24 @@ public class MockThriftMetastoreClient
     }
 
     @Override
+    public Optional<List<SchemaTableName>> getAllTables()
+            throws TException
+    {
+        accessCount.incrementAndGet();
+        if (throwException) {
+            throw new RuntimeException();
+        }
+        return Optional.of(ImmutableList.of(new SchemaTableName(TEST_DATABASE, TEST_TABLE)));
+    }
+
+    @Override
     public List<String> getAllViews(String databaseName)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<List<SchemaTableName>> getAllViews()
     {
         throw new UnsupportedOperationException();
     }
@@ -207,7 +231,7 @@ public class MockThriftMetastoreClient
         if (throwException) {
             throw new RuntimeException();
         }
-        if (!dbName.equals(TEST_DATABASE) || !tableName.equals(TEST_TABLE)) {
+        if (!returnTable || !dbName.equals(TEST_DATABASE) || !tableName.equals(TEST_TABLE)) {
             throw new NoSuchObjectException();
         }
         return new Table(
@@ -378,13 +402,13 @@ public class MockThriftMetastoreClient
     @Override
     public void createDatabase(Database database)
     {
-        throw new UnsupportedOperationException();
+        // No-op, make sure the cache invalidation logic in CachingHiveMetastore will be passed through
     }
 
     @Override
     public void dropDatabase(String databaseName, boolean deleteData, boolean cascade)
     {
-        throw new UnsupportedOperationException();
+        // No-op, make sure the cache invalidation logic in CachingHiveMetastore will be passed through
     }
 
     @Override
@@ -396,7 +420,7 @@ public class MockThriftMetastoreClient
     @Override
     public void createTable(Table table)
     {
-        throw new UnsupportedOperationException();
+        // No-op, make sure the cache invalidation logic in CachingHiveMetastore will be passed through
     }
 
     @Override

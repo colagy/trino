@@ -13,7 +13,6 @@
  */
 package io.trino.plugin.hive.metastore.file;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
@@ -24,13 +23,8 @@ import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
 import io.airlift.json.JsonCodec;
 import io.trino.collect.cache.EvictableCacheBuilder;
-import io.trino.hdfs.DynamicHdfsConfiguration;
-import io.trino.hdfs.HdfsConfig;
-import io.trino.hdfs.HdfsConfiguration;
-import io.trino.hdfs.HdfsConfigurationInitializer;
 import io.trino.hdfs.HdfsContext;
 import io.trino.hdfs.HdfsEnvironment;
-import io.trino.hdfs.authentication.NoHdfsAuthentication;
 import io.trino.plugin.hive.HiveBasicStatistics;
 import io.trino.plugin.hive.HiveColumnStatisticType;
 import io.trino.plugin.hive.HiveType;
@@ -45,7 +39,6 @@ import io.trino.plugin.hive.metastore.Column;
 import io.trino.plugin.hive.metastore.Database;
 import io.trino.plugin.hive.metastore.HiveColumnStatistics;
 import io.trino.plugin.hive.metastore.HiveMetastore;
-import io.trino.plugin.hive.metastore.HiveMetastoreConfig;
 import io.trino.plugin.hive.metastore.HivePrincipal;
 import io.trino.plugin.hive.metastore.HivePrivilegeInfo;
 import io.trino.plugin.hive.metastore.HivePrivilegeInfo.HivePrivilege;
@@ -72,7 +65,6 @@ import org.apache.hadoop.fs.Path;
 import javax.annotation.concurrent.GuardedBy;
 import javax.annotation.concurrent.ThreadSafe;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayDeque;
@@ -148,12 +140,13 @@ public class FileHiveMetastore
     private static final Set<String> ADMIN_USERS = ImmutableSet.of("admin", "hive", "hdfs");
 
     // 128 is equals to the max database name length of Thrift Hive metastore
-    private static final int MAX_DATABASE_NAME_LENGTH = 128;
+    private static final int MAX_NAME_LENGTH = 128;
 
     private final String currentVersion;
     private final VersionCompatibility versionCompatibility;
     private final HdfsEnvironment hdfsEnvironment;
     private final Path catalogDirectory;
+    private final boolean disableLocationChecks;
     private final HdfsContext hdfsContext;
     private final boolean hideDeltaLakeTables;
     private final FileSystem metadataFileSystem;
@@ -168,27 +161,13 @@ public class FileHiveMetastore
     // TODO Remove this speed-up workaround once that https://github.com/trinodb/trino/issues/13115 gets implemented
     private final LoadingCache<String, List<String>> listTablesCache;
 
-    @VisibleForTesting
-    public static FileHiveMetastore createTestingFileHiveMetastore(File catalogDirectory)
-    {
-        HdfsConfig hdfsConfig = new HdfsConfig();
-        HdfsConfiguration hdfsConfiguration = new DynamicHdfsConfiguration(new HdfsConfigurationInitializer(hdfsConfig), ImmutableSet.of());
-        HdfsEnvironment hdfsEnvironment = new HdfsEnvironment(hdfsConfiguration, hdfsConfig, new NoHdfsAuthentication());
-        return new FileHiveMetastore(
-                new NodeVersion("testversion"),
-                hdfsEnvironment,
-                new HiveMetastoreConfig().isHideDeltaLakeTables(),
-                new FileHiveMetastoreConfig()
-                        .setCatalogDirectory(catalogDirectory.toURI().toString())
-                        .setMetastoreUser("test"));
-    }
-
     public FileHiveMetastore(NodeVersion nodeVersion, HdfsEnvironment hdfsEnvironment, boolean hideDeltaLakeTables, FileHiveMetastoreConfig config)
     {
         this.currentVersion = nodeVersion.toString();
         this.versionCompatibility = requireNonNull(config.getVersionCompatibility(), "config.getVersionCompatibility() is null");
         this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
         this.catalogDirectory = new Path(requireNonNull(config.getCatalogDirectory(), "catalogDirectory is null"));
+        this.disableLocationChecks = config.isDisableLocationChecks();
         this.hdfsContext = new HdfsContext(ConnectorIdentity.ofUser(config.getMetastoreUser()));
         this.hideDeltaLakeTables = hideDeltaLakeTables;
         try {
@@ -215,10 +194,6 @@ public class FileHiveMetastore
                 database.getOwnerType(),
                 database.getComment(),
                 database.getParameters());
-
-        if (database.getLocation().isPresent()) {
-            throw new TrinoException(HIVE_METASTORE_ERROR, "Database cannot be created with a location set");
-        }
 
         verifyDatabaseNameLength(database.getDatabaseName());
         verifyDatabaseNotExists(database.getDatabaseName());
@@ -316,8 +291,15 @@ public class FileHiveMetastore
 
     private void verifyDatabaseNameLength(String databaseName)
     {
-        if (databaseName.length() > MAX_DATABASE_NAME_LENGTH) {
-            throw new TrinoException(NOT_SUPPORTED, format("Schema name must be shorter than or equal to '%s' characters but got '%s'", MAX_DATABASE_NAME_LENGTH, databaseName.length()));
+        if (databaseName.length() > MAX_NAME_LENGTH) {
+            throw new TrinoException(NOT_SUPPORTED, format("Schema name must be shorter than or equal to '%s' characters but got '%s'", MAX_NAME_LENGTH, databaseName.length()));
+        }
+    }
+
+    private void verifyTableNameLength(String tableName)
+    {
+        if (tableName.length() > MAX_NAME_LENGTH) {
+            throw new TrinoException(NOT_SUPPORTED, format("Table name must be shorter than or equal to '%s' characters but got '%s'", MAX_NAME_LENGTH, tableName.length()));
         }
     }
 
@@ -339,6 +321,7 @@ public class FileHiveMetastore
     @Override
     public synchronized void createTable(Table table, PrincipalPrivileges principalPrivileges)
     {
+        verifyTableNameLength(table.getTableName());
         verifyDatabaseExists(table.getDatabaseName());
         verifyTableNotExists(table.getDatabaseName(), table.getTableName());
 
@@ -349,7 +332,7 @@ public class FileHiveMetastore
             checkArgument(table.getStorage().getLocation().isEmpty(), "Storage location for view must be empty");
         }
         else if (table.getTableType().equals(MANAGED_TABLE.name())) {
-            if (!(new Path(table.getStorage().getLocation()).toString().contains(tableMetadataDirectory.toString()))) {
+            if (!disableLocationChecks && !(new Path(table.getStorage().getLocation()).toString().contains(tableMetadataDirectory.toString()))) {
                 throw new TrinoException(HIVE_METASTORE_ERROR, "Table directory must be " + tableMetadataDirectory);
             }
         }
@@ -518,6 +501,12 @@ public class FileHiveMetastore
     }
 
     @Override
+    public Optional<List<SchemaTableName>> getAllTables()
+    {
+        return Optional.empty();
+    }
+
+    @Override
     public synchronized List<String> getTablesWithParameter(String databaseName, String parameterKey, String parameterValue)
     {
         requireNonNull(parameterKey, "parameterKey is null");
@@ -567,6 +556,12 @@ public class FileHiveMetastore
                 .filter(table -> table.getTableType().equals(VIRTUAL_VIEW.name()))
                 .map(Table::getTableName)
                 .collect(toImmutableList());
+    }
+
+    @Override
+    public Optional<List<SchemaTableName>> getAllViews()
+    {
+        return Optional.empty();
     }
 
     @Override
@@ -626,6 +621,7 @@ public class FileHiveMetastore
         getRequiredDatabase(newDatabaseName);
 
         // verify new table does not exist
+        verifyTableNameLength(newTableName);
         verifyTableNotExists(newDatabaseName, newTableName);
 
         Path oldPath = getTableMetadataDirectory(databaseName, tableName);

@@ -88,6 +88,11 @@ public abstract class BaseDruidConnectorTest
             case SUPPORTS_INSERT:
             case SUPPORTS_DELETE:
                 return false;
+            case SUPPORTS_TRUNCATE:
+                return true; // TODO ATM Truncate doesn't work in Druid, but testTruncateTable doesn't fail as CREATE TABLE is not supported
+
+            case SUPPORTS_ROW_TYPE:
+                return false;
 
             default:
                 return super.hasBehavior(connectorBehavior);

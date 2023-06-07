@@ -16,6 +16,7 @@ package io.trino.tests.product.launcher.cli;
 import com.github.dockerjava.api.model.Bind;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
+import com.google.inject.Inject;
 import com.google.inject.Module;
 import io.airlift.log.Logger;
 import io.airlift.units.DataSize;
@@ -34,8 +35,6 @@ import org.testcontainers.utility.MountableFile;
 import picocli.CommandLine;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
-
-import javax.inject.Inject;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -128,7 +127,8 @@ public class EnvironmentDescribe
         }
 
         @Override
-        public Integer call() throws Exception
+        public Integer call()
+                throws Exception
         {
             Optional<Path> environmentLogPath = environmentUpOptions.logsDirBase.map(dir -> dir.resolve(environmentUpOptions.environment));
 

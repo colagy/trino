@@ -17,6 +17,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
 import com.google.inject.Inject;
+import com.google.inject.Provider;
 import io.airlift.slice.Slice;
 import io.trino.plugin.google.sheets.SheetsClient;
 import io.trino.plugin.google.sheets.SheetsColumnHandle;
@@ -24,6 +25,7 @@ import io.trino.plugin.google.sheets.SheetsConnectorTableHandle;
 import io.trino.plugin.google.sheets.SheetsMetadata;
 import io.trino.plugin.google.sheets.SheetsSheetTableHandle;
 import io.trino.spi.TrinoException;
+import io.trino.spi.connector.ConnectorAccessControl;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.ConnectorTransactionHandle;
@@ -35,8 +37,6 @@ import io.trino.spi.ptf.Descriptor;
 import io.trino.spi.ptf.ScalarArgument;
 import io.trino.spi.ptf.ScalarArgumentSpecification;
 import io.trino.spi.ptf.TableFunctionAnalysis;
-
-import javax.inject.Provider;
 
 import java.util.List;
 import java.util.Map;
@@ -98,7 +98,11 @@ public class Sheet
         }
 
         @Override
-        public TableFunctionAnalysis analyze(ConnectorSession session, ConnectorTransactionHandle transaction, Map<String, Argument> arguments)
+        public TableFunctionAnalysis analyze(
+                ConnectorSession session,
+                ConnectorTransactionHandle transaction,
+                Map<String, Argument> arguments,
+                ConnectorAccessControl accessControl)
         {
             String sheetId = ((Slice) ((ScalarArgument) arguments.get(ID_ARGUMENT)).getValue()).toStringUtf8();
             validateSheetId(sheetId);

@@ -14,6 +14,8 @@
 package io.trino.plugin.hudi;
 
 import com.google.common.collect.ImmutableList;
+import com.google.inject.Inject;
+import io.trino.filesystem.Location;
 import io.trino.filesystem.TrinoFileSystem;
 import io.trino.filesystem.TrinoFileSystemFactory;
 import io.trino.filesystem.TrinoInputFile;
@@ -30,6 +32,7 @@ import io.trino.plugin.hive.HivePartitionKey;
 import io.trino.plugin.hive.ReaderColumns;
 import io.trino.plugin.hive.parquet.ParquetReaderConfig;
 import io.trino.plugin.hive.parquet.TrinoParquetDataSource;
+import io.trino.plugin.hudi.model.HudiFileFormat;
 import io.trino.spi.TrinoException;
 import io.trino.spi.block.Block;
 import io.trino.spi.connector.ColumnHandle;
@@ -43,8 +46,6 @@ import io.trino.spi.connector.DynamicFilter;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.type.Decimals;
 import io.trino.spi.type.TypeSignature;
-import org.apache.hadoop.fs.Path;
-import org.apache.hudi.common.model.HoodieFileFormat;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.FileMetaData;
@@ -53,8 +54,6 @@ import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.schema.MessageType;
 import org.joda.time.DateTimeZone;
-
-import javax.inject.Inject;
 
 import java.io.IOException;
 import java.sql.Timestamp;
@@ -146,9 +145,9 @@ public class HudiPageSourceProvider
             DynamicFilter dynamicFilter)
     {
         HudiSplit split = (HudiSplit) connectorSplit;
-        Path path = new Path(split.getPath());
-        HoodieFileFormat hudiFileFormat = getHudiFileFormat(path.toString());
-        if (!HoodieFileFormat.PARQUET.equals(hudiFileFormat)) {
+        String path = split.getLocation();
+        HudiFileFormat hudiFileFormat = getHudiFileFormat(path);
+        if (!HudiFileFormat.PARQUET.equals(hudiFileFormat)) {
             throw new TrinoException(HUDI_UNSUPPORTED_FILE_FORMAT, format("File format %s not supported", hudiFileFormat));
         }
 
@@ -161,8 +160,16 @@ public class HudiPageSourceProvider
                 .filter(columnHandle -> !columnHandle.isPartitionKey() && !columnHandle.isHidden())
                 .collect(Collectors.toList());
         TrinoFileSystem fileSystem = fileSystemFactory.create(session);
-        TrinoInputFile inputFile = fileSystem.newInputFile(path.toString(), split.getFileSize());
-        ConnectorPageSource dataPageSource = createPageSource(session, regularColumns, split, inputFile, dataSourceStats, options, timeZone);
+        TrinoInputFile inputFile = fileSystem.newInputFile(Location.of(path), split.getFileSize());
+        ConnectorPageSource dataPageSource = createPageSource(
+                session,
+                regularColumns,
+                split,
+                inputFile,
+                dataSourceStats,
+                options.withBatchColumnReaders(isParquetOptimizedReaderEnabled(session))
+                        .withBatchNestedColumnReaders(isParquetOptimizedNestedReaderEnabled(session)),
+                timeZone);
 
         return new HudiPageSource(
                 toPartitionName(split.getPartitionKeys()),
@@ -185,7 +192,7 @@ public class HudiPageSourceProvider
     {
         ParquetDataSource dataSource = null;
         boolean useColumnNames = shouldUseParquetColumnNames(session);
-        Path path = new Path(hudiSplit.getPath());
+        String path = hudiSplit.getLocation();
         long start = hudiSplit.getStart();
         long length = hudiSplit.getLength();
         try {
@@ -238,8 +245,7 @@ public class HudiPageSourceProvider
                     finalDataSource,
                     timeZone,
                     newSimpleAggregatedMemoryContext(),
-                    options.withBatchColumnReaders(isParquetOptimizedReaderEnabled(session))
-                            .withBatchNestedColumnReaders(isParquetOptimizedNestedReaderEnabled(session)),
+                    options,
                     exception -> handleException(dataSourceId, exception),
                     Optional.of(parquetPredicate),
                     columnIndexes.build(),
